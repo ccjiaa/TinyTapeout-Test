@@ -1,41 +1,45 @@
 import cocotb
-from cocotb.triggers import RisingEdge, Timer
 from cocotb.clock import Clock
+from cocotb.triggers import RisingEdge
+
 
 @cocotb.test()
 async def test_counter(dut):
-    """Test programmable 8-bit counter"""
+    """Test the 8-bit counter using ui bits directly"""
 
-    # Start a clock with 10ns period
-    clock = Clock(dut.clk, 10, units="ns")
+    clock = Clock(dut.clk, 10, units="ns")  # 100 MHz clock
     cocotb.start_soon(clock.start())
 
     # Reset
     dut.rst_n.value = 0
-    dut.load.value = 0
-    dut.enable.value = 0
-    dut.oe.value = 1
+    dut.ui.value = 0
+    await RisingEdge(dut.clk)
     await RisingEdge(dut.clk)
     dut.rst_n.value = 1
 
-    # Wait for a few cycles
-    for _ in range(2):
+    # Wait a few cycles for reset to propagate
+    for _ in range(5):
         await RisingEdge(dut.clk)
 
-    # Load value synchronously
-    dut.load_value.value = 123
-    dut.load.value = 1
+    # Load value 123 into counter:
+    load_val = 123
+    # Set ui: bit 1 = load, bits [7:0] = load_value
+    dut.ui.value = (load_val & 0xFF) | (1 << 1)  # load=1
     await RisingEdge(dut.clk)
-    dut.load.value = 0
-
-    assert dut.q.value == 123, f"Expected 123 after load, got {dut.q.value}"
-
-    # Enable counting
-    dut.enable.value = 1
+    # Clear load
+    dut.ui.value = 0
     await RisingEdge(dut.clk)
-    assert dut.q.value == 124, f"Expected 124 after count, got {dut.q.value}"
 
-    # Check tri-state behavior
-    dut.oe.value = 0
-    await Timer(1, units="ns")
-    assert dut.q.value.is_resolvable == False, "Output should be high-impedance when oe=0"
+    assert dut.uo.value.integer == load_val, f"Load failed: expected {load_val}, got {dut.uo.value.integer}"
+
+    # Enable counting:
+    dut.ui.value = 1  # enable=1, load=0
+    await RisingEdge(dut.clk)
+    expected = (load_val + 1) & 0xFF
+    assert dut.uo.value.integer == expected, f"Count failed: expected {expected}, got {dut.uo.value.integer}"
+
+    # Advance a few counts
+    for i in range(2, 5):
+        await RisingEdge(dut.clk)
+        expected = (load_val + i) & 0xFF
+        assert dut.uo.value.integer == expected, f"Count failed at step {i}: expected {expected}, got {dut.uo.value.integer}"
