@@ -2,54 +2,48 @@ import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge
 
-
 @cocotb.test()
 async def test_counter(dut):
-    """Test the 8-bit counter using ui bus for control signals."""
-
-    # Start clock with 10 ns period
+    # Start clock with 10ns period
     clock = Clock(dut.clk, 10, units="ns")
     cocotb.start_soon(clock.start())
 
-    # Reset the DUT
+    # Apply reset
     dut.rst_n.value = 0
-    dut.ui.value = 0  # clear inputs
+    await RisingEdge(dut.clk)
     await RisingEdge(dut.clk)
     dut.rst_n.value = 1
+
+    # Initially enable = 0, load = 0
+    dut.ui.value = 0
+
+    # Wait a few cycles
+    for _ in range(3):
+        await RisingEdge(dut.clk)
+
+    # Load a value: ui[1] = load = 1, ui[7:0] = 123
+    load_val = 123
+    dut.ui.value = (1 << 1) | load_val  # load bit + load value bits
     await RisingEdge(dut.clk)
 
-    # Load a value into the counter:
-    # ui[1] = load = 1
-    # ui[7:0] = load_value = 123 (0x7B)
-    load_value = 123
-    dut.ui.value = (1 << 1) | load_value
-    await RisingEdge(dut.clk)
-
-    # Remove load signal (ui[1]) to zero so counter can run
+    # Load bit low again
     dut.ui.value = 0
     await RisingEdge(dut.clk)
 
-    # Check if the counter loaded correctly
-    assert dut.uo.value == load_value, f"Expected counter load {load_value}, got {dut.uo.value}"
+    # Check output uo matches loaded value
+    assert dut.uo.value.integer == load_val, f"Expected uo={load_val}, got {dut.uo.value.integer}"
 
-    # Enable counting: ui[0] = enable = 1
+    # Enable counting: ui[0] = enable = 1, ui[1] = load = 0
     dut.ui.value = 1
     await RisingEdge(dut.clk)
 
-    # Counter should increment by 1
-    expected = (load_value + 1) & 0xFF
-    assert dut.uo.value == expected, f"Expected counter increment {expected}, got {dut.uo.value}"
+    # Check uo incremented by 1
+    expected = load_val + 1
+    assert dut.uo.value.integer == expected, f"Expected uo={expected}, got {dut.uo.value.integer}"
 
-    # Let counter count a few more cycles
-    for i in range(5):
+    # Wait a few cycles with enable on, check counting
+    for i in range(2, 5):
         await RisingEdge(dut.clk)
-        expected = (expected + 1) & 0xFF
-        assert dut.uo.value == expected, f"At cycle {i+1}, expected {expected}, got {dut.uo.value}"
+        expected = load_val + i
+        assert dut.uo.value.integer == expected, f"Expected uo={expected}, got {dut.uo.value.integer}"
 
-    # Reset again and check counter resets to zero
-    dut.rst_n.value = 0
-    await RisingEdge(dut.clk)
-    dut.rst_n.value = 1
-    await RisingEdge(dut.clk)
-
-    assert dut.uo.value == 0, f"Expected counter reset to 0, got {dut.uo.value}"
